@@ -4,58 +4,52 @@ import java.awt.Color
 import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
+import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.sqrt
 
-fun main(args: Array<String>) {
-    // get filenames
-    val (_, srcName, _, destName) = args
+class SeamCarver(srcName: String, private val destName: String) {
+    private val src = ImageIO.read(File(srcName))
+    private val energy = Array(src.height) { Array(src.width) { 0.0 } }
+    private var maxEnergy = 0.0
 
-    // read input file
-    val src = ImageIO.read(File(srcName))
+    private fun calculateEnergy() {
+        val xMax = src.width - 2
+        val yMax = src.height - 2
 
-    // create canvas
-    val dest = BufferedImage(src.width, src.height, BufferedImage.TYPE_INT_RGB)
+        for (x in 0 until src.width) {
+            for (y in 0 until src.height) {
+                val dX = color(x.coerceIn(1, xMax) - 1, y) - color(x.coerceIn(1, xMax) + 1, y)
+                val dY = color(x, y.coerceIn(1, yMax) - 1) - color(x, y.coerceIn(1, yMax) + 1)
+                energy[y][x] = sqrt(dX + dY)
 
-    val energy = Array(src.height) { Array<Double>(src.width) { 0.0 } }
-
-    // invert all the pixels
-    for (x in 0 until src.width) {
-        for (y in 0 until src.height) {
-            val xBefore = Color(src.getRGB(x.coerceIn(1, src.width - 2) - 1, y))
-            val xAfter = Color(src.getRGB(x.coerceIn(1, src.width - 2) + 1, y))
-
-            val xRed = (xBefore.red - xAfter.red).toDouble().pow(2)
-            val xGreen = (xBefore.green - xAfter.green).toDouble().pow(2)
-            val xBlue = (xBefore.blue - xAfter.blue).toDouble().pow(2)
-
-            val xEnergy = xRed + xGreen + xBlue
-
-            val yBefore = Color(src.getRGB(x, y.coerceIn(1, src.height - 2) - 1))
-            val yAfter = Color(src.getRGB(x, y.coerceIn(1, src.height - 2) + 1))
-
-            val yRed = (yBefore.red - yAfter.red).toDouble().pow(2)
-            val yGreen = (yBefore.green - yAfter.green).toDouble().pow(2)
-            val yBlue = (yBefore.blue - yAfter.blue).toDouble().pow(2)
-
-            val yEnergy = yRed + yGreen + yBlue
-
-            val totalEnergy = xEnergy + yEnergy
-
-            energy[y][x] = sqrt(totalEnergy)
+                maxEnergy = max(energy[y][x], maxEnergy)
+            }
         }
     }
 
-    val maxEnergy = energy.flatten().maxOrNull() ?: 0.0
+    private fun writeImage() {
+        val dest = BufferedImage(src.width, src.height, BufferedImage.TYPE_INT_RGB)
 
-    for (x in 0 until src.width) {
-        for (y in 0 until src.height) {
-            val normalized = (255.0 * energy[y][x] / maxEnergy).toInt()
-            val color = Color(normalized, normalized, normalized)
-            dest.setRGB(x, y, color.rgb)
+        for (x in 0 until src.width) {
+            for (y in 0 until src.height) {
+                val intensity = (255.0 * energy[y][x] / maxEnergy).toInt()
+                dest.setRGB(x, y, Color(intensity, intensity, intensity).rgb)
+            }
         }
+
+        ImageIO.write(dest, "png", File(destName))
     }
 
-    // write the final image to disk
-    ImageIO.write(dest, "png", File(destName))
+    private fun color(x: Int, y: Int) = Color(src.getRGB(x, y))
+    private fun pow2(i: Int) = i.toDouble().pow(2)
+    private operator fun Color.minus(other: Color) =
+        pow2(this.red - other.red) + pow2(this.green - other.green) + pow2(this.blue - other.blue)
+
+    fun run() {
+        calculateEnergy()
+        writeImage()
+    }
 }
+
+fun main(args: Array<String>) = SeamCarver(args[1], args[3]).run()

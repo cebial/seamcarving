@@ -8,20 +8,36 @@ import kotlin.math.pow
 import kotlin.math.sqrt
 
 class SeamCarver(srcName: String, private val destName: String) {
+    // who needs error checking?
     private val src = ImageIO.read(File(srcName))
-    private val energy = Array(src.height) { Array(src.width) { 0.0 } }
-    private val energyDP = Array(src.height) { Array(src.width) { 0.0 } }
+    private val width = src.width
+    private val height = src.height
+
+    // a matrix with the energy per node
+    private val energy = Array(height) { Array(width) { 0.0 } }
     private var maxEnergy = 0.0
-    private val currentSeam = Array(src.height) { 0 }
 
+    // a matrix with the calculated Shortest Path Values
+    private val spv = Array(height) { Array(width) { 0.0 } }
+
+    // an array with the current vertical seam
+    private val vSeam = Array(height) { 0 }
+
+    // helper functions
+    private fun bindX(x: Int, offset: Int = 0) = x.coerceIn(0 + offset, width - 1 - offset)
+    private fun bindY(y: Int, offset: Int = 0) = y.coerceIn(0 + offset, height - 1 - offset)
+    private fun color(x: Int, y: Int) = Color(src.getRGB(x, y))
+    private fun pow2(i: Int) = i.toDouble().pow(2)
+    private operator fun Color.minus(other: Color) =
+        pow2(this.red - other.red) + pow2(this.green - other.green) + pow2(this.blue - other.blue)
+
+    // calculate the energy for each pixel and fill the energy matrix
     private fun calculateEnergy() {
-        val xMax = src.width - 2
-        val yMax = src.height - 2
-
-        for (x in 0 until src.width) {
-            for (y in 0 until src.height) {
-                val dX = color(x.coerceIn(1, xMax) - 1, y) - color(x.coerceIn(1, xMax) + 1, y)
-                val dY = color(x, y.coerceIn(1, yMax) - 1) - color(x, y.coerceIn(1, yMax) + 1)
+        for (x in 0 until width) {
+            for (y in 0 until height) {
+                // using bind-functions to coerce pixels on the border of the image to the inside of the border
+                val dX = color(bindX(x, 1) - 1, y) - color(bindX(x, 1) + 1, y)
+                val dY = color(x, bindY(y, 1) - 1) - color(x, bindY(y, 1) + 1)
                 energy[y][x] = sqrt(dX + dY)
 
                 maxEnergy = maxOf(energy[y][x], maxEnergy)
@@ -29,75 +45,52 @@ class SeamCarver(srcName: String, private val destName: String) {
         }
     }
 
-    private fun findVerticalSeam() {
+    // calculate the shortest path values for each pixel and save them
+    private fun findShortestPaths() {
         // energy values for the first row are identical to the original values
-        energyDP[0] = energy[0]
+        spv[0] = energy[0]
 
         // for all other rows, for each pixel, new energy is equal to its own energy
-        // plus the minimum of the three above
-        for (y in 1 until src.height) {
-            for (x in 0 until src.width) {
-                energyDP[y][x] = energy[y][x] + when (x) {
-                    0 -> minOf(energyDP[y - 1][x], energyDP[y - 1][x + 1])
-                    src.width - 1 -> minOf(energyDP[y - 1][x - 1], energyDP[y - 1][x])
-                    else -> minOf(energyDP[y - 1][x - 1], energyDP[y - 1][x], energyDP[y - 1][x + 1])
-                }
+        // plus the minimum of the three above, or two if we are at the horizontal border
+        for (y in 1 until height) {
+            for (x in 0 until width) {
+                spv[y][x] = energy[y][x] + minOf(spv[y - 1][bindX(x - 1)], spv[y - 1][x], spv[y - 1][bindX(x + 1)])
             }
         }
-
-        var x = energyDP[src.height - 1].indexOf(energyDP[src.height - 1].minOf { it })
-
-        currentSeam[src.height - 1] = x
-
-        for (y in src.height - 2 downTo 0) {
-            val map = mutableMapOf<Int, Double>()
-            if (x > 0) map[x - 1] = energyDP[y][x - 1]
-            map[x] = energyDP[y][x]
-            if (x < src.width - 1) map[x + 1] = energyDP[y][x + 1]
-
-            currentSeam[y] = map.minByOrNull { it.value }!!.key
-            x = currentSeam[y]
-        }
-        currentSeam.forEach(::println)
-
     }
 
-    private fun writeImageWithSeam() {
-        val dest = BufferedImage(src.width, src.height, BufferedImage.TYPE_INT_RGB)
+    private fun findVerticalSeam() {
+        var x = spv[height - 1].indexOf(spv[height - 1].minOf { it })
+        vSeam[height - 1] = x
 
-        for (x in 0 until src.width) {
-            for (y in 0 until src.height) {
-                val col = if (currentSeam[y] == x) Color.RED else Color(src.getRGB(x, y))
-                dest.setRGB(x, y, col.rgb)
-            }
+        for (y in height - 2 downTo 0) {
+            // using a map to preserve the indexes
+            val map = mutableMapOf<Int, Double>(x to spv[y][x])
+            if (x > 0) map[x - 1] = spv[y][x - 1]
+            if (x < width - 1) map[x + 1] = spv[y][x + 1]
+
+            vSeam[y] = map.minByOrNull { it.value }!!.key
+            x = vSeam[y]
         }
-
-
-        ImageIO.write(dest, "png", File(destName))
     }
 
-    private fun writeImageWithIntensity() {
-        val dest = BufferedImage(src.width, src.height, BufferedImage.TYPE_INT_RGB)
+    private fun writeImage() {
+        val dest = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
 
-        for (x in 0 until src.width) {
-            for (y in 0 until src.height) {
-                val intensity = (255.0 * energy[y][x] / maxEnergy).toInt()
-                dest.setRGB(x, y, Color(intensity, intensity, intensity).rgb)
+        for (x in 0 until width) {
+            for (y in 0 until height) {
+                dest.setRGB(x, y, if (vSeam[y] == x) Color.RED.rgb else src.getRGB(x, y))
             }
         }
 
         ImageIO.write(dest, "png", File(destName))
     }
-
-    private fun color(x: Int, y: Int) = Color(src.getRGB(x, y))
-    private fun pow2(i: Int) = i.toDouble().pow(2)
-    private operator fun Color.minus(other: Color) =
-        pow2(this.red - other.red) + pow2(this.green - other.green) + pow2(this.blue - other.blue)
 
     fun run() {
         calculateEnergy()
+        findShortestPaths()
         findVerticalSeam()
-        writeImageWithSeam()
+        writeImage()
     }
 }
 

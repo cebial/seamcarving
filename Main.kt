@@ -12,16 +12,11 @@ class SeamCarver(srcName: String, private val destName: String) {
     private val src = ImageIO.read(File(srcName))
     private val width = src.width
     private val height = src.height
+    val dest = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
 
     // a matrix with the energy per node
     private val energy = Array(height) { Array(width) { 0.0 } }
     private var maxEnergy = 0.0
-
-    // a matrix with the calculated Shortest Path Values
-    private val spv = Array(height) { Array(width) { 0.0 } }
-
-    // an array with the current vertical seam
-    private val vSeam = Array(height) { 0 }
 
     // helper functions
     private fun bindX(x: Int, offset: Int = 0) = x.coerceIn(0 + offset, width - 1 - offset)
@@ -45,23 +40,45 @@ class SeamCarver(srcName: String, private val destName: String) {
         }
     }
 
-    // calculate the shortest path values for each pixel and save them
-    private fun findShortestPaths() {
+    private fun transpose(matrix: Array<Array<Double>>): Array<Array<Double>> {
+        val transposed = Array(energy[0].size) { Array(energy.size) { 0.0 } }
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                transposed[x][y] = matrix[y][x]
+            }
+        }
+        return transposed
+    }
+    private fun findVerticalSeam() = findSeam(energy)
+    private fun findHorizontalSeam() = findSeam(transpose(energy))
+
+
+    private fun findSeam(matrix: Array<Array<Double>>): Array<Int> {
+        // a matrix with the calculated Shortest Path Values
+        val spv = Array(matrix.size) { Array(matrix[0].size) { 0.0 } }
+
+        // shadowing because I have to.. just to make it work for now
+        val height = matrix.size
+        val width = matrix[0].size
+        fun bindX(x: Int, offset: Int = 0) = x.coerceIn(0 + offset, width - 1 - offset)
+        fun bindY(y: Int, offset: Int = 0) = y.coerceIn(0 + offset, height - 1 - offset)
+
         // energy values for the first row are identical to the original values
-        spv[0] = energy[0]
+        spv[0] = matrix[0]
 
         // for all other rows, for each pixel, new energy is equal to its own energy
         // plus the minimum of the three above, or two if we are at the horizontal border
         for (y in 1 until height) {
             for (x in 0 until width) {
-                spv[y][x] = energy[y][x] + minOf(spv[y - 1][bindX(x - 1)], spv[y - 1][x], spv[y - 1][bindX(x + 1)])
+//                println("x: $x; y: $y")
+                spv[y][x] = matrix[y][x] + minOf(spv[y - 1][bindX(x - 1)], spv[y - 1][x], spv[y - 1][bindX(x + 1)])
             }
         }
-    }
 
-    private fun findVerticalSeam() {
         var x = spv[height - 1].indexOf(spv[height - 1].minOf { it })
-        vSeam[height - 1] = x
+
+        val seam = Array(height) { 0 }
+        seam[height - 1] = x
 
         for (y in height - 2 downTo 0) {
             // using a map to preserve the indexes
@@ -69,17 +86,19 @@ class SeamCarver(srcName: String, private val destName: String) {
             if (x > 0) map[x - 1] = spv[y][x - 1]
             if (x < width - 1) map[x + 1] = spv[y][x + 1]
 
-            vSeam[y] = map.minByOrNull { it.value }!!.key
-            x = vSeam[y]
+            seam[y] = map.minByOrNull { it.value }!!.key
+            x = seam[y]
         }
+
+        return seam
     }
 
-    private fun writeImage() {
-        val dest = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
 
+    private fun writeImage(seam: Array<Int>) {
         for (x in 0 until width) {
             for (y in 0 until height) {
-                dest.setRGB(x, y, if (vSeam[y] == x) Color.RED.rgb else src.getRGB(x, y))
+//                dest.setRGB(x, y, if (seam[y] == x) Color.RED.rgb else src.getRGB(x, y))
+                dest.setRGB(x, y, if (seam[x] == y) Color.RED.rgb else src.getRGB(x, y))
             }
         }
 
@@ -88,9 +107,9 @@ class SeamCarver(srcName: String, private val destName: String) {
 
     fun run() {
         calculateEnergy()
-        findShortestPaths()
-        findVerticalSeam()
-        writeImage()
+
+
+        writeImage(findHorizontalSeam())
     }
 }
 
